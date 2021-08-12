@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>bc-connector-apache-spark_${scala.binary.version}</artifactId>
+    <name>bc-connector-apache-spark-${spark.version}</name>
+    <description>Spark ${spark.version} for BigConnect Connector for Apache Spark</description>
+
+    <version>${project.parent.version}_for_spark_3</version>
+    <packaging>jar</packaging>
+
+    <parent>
+        <groupId>io.bigconnect</groupId>
+        <artifactId>bc-connector-apache-spark</artifactId>
+        <version>4.3.0</version>
+    </parent>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.bigconnect</groupId>
+            <artifactId>bc-connector-apache-spark_${scala.binary.version}_common</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.bigconnect</groupId>
+            <artifactId>bc-connector-apache-spark_${scala.binary.version}_test-support</artifactId>
+            <version>${project.parent.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.2.4</version>
+                <configuration>
+                    <shadedArtifactAttached>true</shadedArtifactAttached>
+                    <shadedClassifierName>driver</shadedClassifierName>
+                    <minimizeJar>false</minimizeJar>
+                    <filters>
+                        <filter>
+                            <artifact>*:*</artifact>
+                            <excludes>
+                                <exclude>META-INF/*.SF</exclude>
+                                <exclude>META-INF/*.DSA</exclude>
+                                <exclude>META-INF/*.RSA</exclude>
+                                <exclude>META-INF/LICENSE.txt</exclude>
+                                <exclude>META-INF/LICENSE</exclude>
+                                <exclude>META-INF/NOTICE.txt</exclude>
+                            </excludes>
+                        </filter>
+                    </filters>
+                    <artifactSet>
+                        <includes>
+                            <include>io.bigconnect:*</include>
+                            <include>org.apache.accumulo:*</include>
+                            <include>org.elasticsearch:*</include>
+                            <include>org.elasticsearch.client:*</include>
+                            <include>org.elasticsearch.plugin:*</include>
+                            <include>org.apache.lucene:*</include>
+                            <include>org.projectlombok:*</include>
+                            <include>com.carrotsearch:*</include>
+                            <include>com.tdunning:*</include>
+                            <include>org.cache2k:*</include>
+                            <include>org.locationtech.jts:*</include>
+                        </includes>
+                    </artifactSet>
+                    <transformers>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                    </transformers>
+                </configuration>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

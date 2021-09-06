@@ -14,8 +14,8 @@ import java.util.UUID
 class DataSource extends TableProvider with DataSourceRegister {
   Validations.version("3.*")
   private val jobId: String = UUID.randomUUID().toString
-  private var schema: StructType = null
-  private var bcOptions: BcOptions = null
+  private var schema: StructType = _
+  private var bcOptions: BcOptions = _
 
   override def supportsExternalMetadata(): Boolean = true
 

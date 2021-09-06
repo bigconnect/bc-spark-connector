@@ -5,23 +5,23 @@ import com.mware.core.config.Configuration
 import com.mware.core.model.clientapi.dto.PropertyType
 import com.mware.core.model.schema.SchemaRepository
 import com.mware.ge.mutation.ElementMutation
-import com.mware.ge.values.storable.{Value, Values}
+import com.mware.ge.values.storable._
 import com.mware.ge.{Element, ElementType, Visibility}
 import io.bigconnect.spark.util.BcUtil._
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.util.DateTimeUtils
-import org.apache.spark.sql.types.{DataType, DataTypes, StructField, StructType}
+import org.apache.spark.sql.catalyst.util.{ArrayData, DateTimeUtils}
+import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
 
-import java.io.InputStream
 import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 import java.util.Optional
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 object BcMapping {
-  val TYPE_VERTEX = "vertex"
-  val TYPE_EDGE = "edge"
+  val TYPE_VERTEX = "VERTEX"
+  val TYPE_EDGE = "EDGE"
 
   val ID_FIELD = "_id"
   val SOURCE_ID_FIELD = "_sid"
@@ -29,7 +29,19 @@ object BcMapping {
   val CONCEPT_TYPE_FIELD = "_conceptType"
   val EDGE_LABEL_FIELD = "_edgeLabel"
 
+  val POINT_TYPE = "point"
+  val DURATION_TYPE = "duration"
+
   val mapper = new ObjectMapper()
+
+  val durationType: DataType = DataTypes.createStructType(Array(
+    DataTypes.createStructField("type", DataTypes.StringType, false),
+    DataTypes.createStructField("months", DataTypes.LongType, false),
+    DataTypes.createStructField("days", DataTypes.LongType, false),
+    DataTypes.createStructField("seconds", DataTypes.LongType, false),
+    DataTypes.createStructField("nanoseconds", DataTypes.IntegerType, false),
+    DataTypes.createStructField("value", DataTypes.StringType, false)
+  ))
 
   def convertFromSpark(value: Any, schema: StructField = null): Value = {
     value match {
@@ -70,20 +82,30 @@ object BcMapping {
 
   def convertToInternalRow(map: mutable.Map[String, Value], schema: StructType): InternalRow = InternalRow
     .fromSeq(
-      schema.map(field => bcValueToSpark(map.get(field.name).map(v => v.asObjectCopy()).orNull, field.dataType))
+      schema.map(field => bcValueToSpark(map.get(field.name).orNull, field.dataType))
     )
 
   def bcValueToSpark(value: Any, schema: DataType): Any = {
-    if (schema != null && schema == DataTypes.StringType && value != null && !value.isInstanceOf[String]) {
-      if (value.isInstanceOf[InputStream])
-        bcValueToSpark("<>", schema)
-      else
-        bcValueToSpark(mapper.writeValueAsString(value), schema)
-    } else {
-      value match {
-        case s: String => UTF8String.fromString(s)
-        case _ => value
+    value match {
+      case zt: DateTimeValue => DateTimeUtils.instantToMicros(zt.asObjectCopy().toInstant)
+      case dt: LocalDateTimeValue => DateTimeUtils.instantToMicros(dt.asObjectCopy().toInstant(ZoneOffset.UTC))
+      case d: DateValue => d.asObjectCopy().toEpochDay.toInt
+      case s: TextValue => UTF8String.fromString(s.stringValue())
+      case dv: DurationValue => {
+        val months = dv.get(ChronoUnit.MONTHS)
+        val days = dv.get(ChronoUnit.DAYS)
+        val seconds = dv.get(ChronoUnit.SECONDS)
+        val nanoseconds: Integer = dv.get(ChronoUnit.NANOS).toInt
+        InternalRow.fromSeq(Seq(
+          UTF8String.fromString(DURATION_TYPE), months, days, seconds, nanoseconds, UTF8String.fromString(dv.toString))
+        )
       }
+      case a: ArrayValue => {
+        val elementType = if (schema != null) schema.asInstanceOf[ArrayType].elementType else null
+        ArrayData.toArrayData(a.asScala.map(e => bcValueToSpark(e, elementType)).toArray)
+      }
+      case v: Value => v.asObjectCopy()
+      case _ => value
     }
   }
 
@@ -93,7 +115,7 @@ object BcMapping {
       .asScala
       .filter(p => Option.apply(p.getUserVisible).getOrElse(false))
       .map(p => {
-        StructField(p.getName, toSparkDataType(p.getDataType))
+        StructField(p.getName, toSparkDataType(p.getName, p.getDataType))
       })
       .toBuffer
       .sortBy(t => t.name)
@@ -109,12 +131,33 @@ object BcMapping {
     StructType(structFields.reverse)
   }
 
-  def toSparkDataType(bcDataType: PropertyType): DataType = {
+  def toSparkDataType(name: String, bcDataType: PropertyType): DataType = {
     bcDataType match {
-      case PropertyType.DATE => DataTypes.DateType
-      case PropertyType.DOUBLE => DataTypes.DoubleType
       case PropertyType.BOOLEAN => DataTypes.BooleanType
+      case PropertyType.BOOLEAN_ARRAY => DataTypes.createArrayType(DataTypes.BooleanType)
       case PropertyType.INTEGER => DataTypes.IntegerType
+      case PropertyType.INTEGER_ARRAY => DataTypes.createArrayType(DataTypes.IntegerType)
+      case PropertyType.LONG => DataTypes.LongType
+      case PropertyType.LONG_ARRAY => DataTypes.createArrayType(DataTypes.LongType)
+      case PropertyType.SHORT => DataTypes.ShortType
+      case PropertyType.SHORT_ARRAY => DataTypes.createArrayType(DataTypes.ShortType)
+      case PropertyType.BYTE => DataTypes.ByteType
+      case PropertyType.BYTE_ARRAY => DataTypes.createArrayType(DataTypes.ByteType)
+      case PropertyType.FLOAT => DataTypes.FloatType
+      case PropertyType.FLOAT_ARRAY => DataTypes.createArrayType(DataTypes.FloatType)
+      case PropertyType.DOUBLE => DataTypes.DoubleType
+      case PropertyType.DOUBLE_ARRAY => DataTypes.createArrayType(DataTypes.DoubleType)
+      case PropertyType.DATE => DataTypes.TimestampType
+      case PropertyType.DATETIME => DataTypes.TimestampType
+      case PropertyType.DATETIME_ARRAY => DataTypes.createArrayType(DataTypes.TimestampType)
+      case PropertyType.LOCAL_DATE => DataTypes.DateType
+      case PropertyType.LOCAL_DATE_ARRAY => DataTypes.createArrayType(DataTypes.DateType)
+      case PropertyType.LOCAL_DATETIME => DataTypes.TimestampType
+      case PropertyType.LOCAL_DATETIME_ARRAY => DataTypes.createArrayType(DataTypes.TimestampType)
+      case PropertyType.STREAMING => DataTypes.BinaryType
+      case PropertyType.STRING_ARRAY => DataTypes.createArrayType(DataTypes.StringType)
+      case PropertyType.DURATION => durationType
+      case PropertyType.DURATION_ARRAY => DataTypes.createArrayType(durationType)
       // Default is String
       case _ => DataTypes.StringType
     }

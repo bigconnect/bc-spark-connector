@@ -3,14 +3,12 @@ package io.bigconnect.spark3
 import com.mware.core.model.schema.SchemaConstants
 import io.bigconnect.spark.SparkConnectorScalaBaseTest
 import io.bigconnect.spark.util.{BcMapping, BcOptions}
-import org.apache.spark.sql.{SaveMode, SparkSession}
+import org.apache.spark.sql.SaveMode
 import org.junit.Test
 
 case class Person(name: String, surname: String, age: Int)
 
 class DataSourceWriterTest extends SparkConnectorScalaBaseTest {
-  private val spark: SparkSession = sparkSession()
-
   import spark.implicits._
 
   @Test

@@ -13,13 +13,13 @@ Prerequisites:
 You can build for Spark 2.4 with both Scala 2.11 and Scala 2.12
 
 ```
-./mvnw clean package -P spark-2.4 -P scala-2.11 -DskipTests
-./mvnw clean package -P spark-2.4 -P scala-2.12 -DskipTests
+JAVA_HOME=<path_to_jdk8> mvn clean package -P spark-2.4 -P scala-2.11 -DskipTests
+JAVA_HOME=<path_to_jdk8> mvn clean package -P spark-2.4 -P scala-2.12 -DskipTests
 ```
 
 These commands will generate the corresponding targets
-* `spark-2.4/target/bc-connector-apache-spark_2.11-4.3.0_for_spark_2.4.jar`
-* `spark-2.4/target/bc-connector-apache-spark_2.12-4.3.0_for_spark_2.4.jar`
+* `spark-2.4/target/bc-connector-apache-spark_2.11-VERSION_for_spark_2.4.jar`
+* `spark-2.4/target/bc-connector-apache-spark_2.12-VERSION_for_spark_2.4.jar`
 
 
 ### Building for Spark 3
@@ -27,10 +27,10 @@ These commands will generate the corresponding targets
 You can build for Spark 3 by running
 
 ```
-./mvnw clean package -P spark-3 -P scala-2.12 -DskipTests
+JAVA_HOME=<path_to_jdk8> mvn clean package -P spark-3 -P scala-2.12 -DskipTests
 ```
 
-This will generate `spark-3/target/bc-connector-apache-spark_2.12-4.3.0_for_spark_3.jar`
+This will generate `spark-3/target/bc-connector-apache-spark_2.12-VERSION_for_spark_3.jar`
 
 
 ## Integration with Apache Spark Applications
@@ -47,20 +47,18 @@ For Spark 3 add log4j-api and log4j-core 2.11.1 to SPARK_HOME/jars folder
 
 If you use the [sbt-spark-package plugin](https://github.com/databricks/sbt-spark-package), in your sbt build file, add:
 
-```scala spDependencies += "io.bigconnect/bc-connector-apache-spark_2.11:4.3.0_for_spark_2.4"```
+```scala spDependencies += "io.bigconnect/bc-connector-apache-spark_2.11:VERSION_for_spark_2.4"```
 
 Otherwise,
 
 ```scala
-resolvers += "Spark Packages Repo" at "http://dl.bintray.com/spark-packages/maven"
-libraryDependencies += "io.bigconnect" % "bc-connector-apache-spark_2.12" % "4.3.0_for_spark_2.4"
+libraryDependencies += "io.bigconnect" % "bc-connector-apache-spark_2.12" % "VERSION_for_spark_2.4"
 ```
 
 Or, for Spark 3
 
 ```scala
-resolvers += "Spark Packages Repo" at "http://dl.bintray.com/spark-packages/maven"
-libraryDependencies += "io.bigconnect" % "bc-connector-apache-spark_2.12" % "4.3.0_for_spark_3"
+libraryDependencies += "io.bigconnect" % "bc-connector-apache-spark_2.12" % "VERSION_for_spark_3"
 ```  
 
 **maven**  
@@ -72,16 +70,9 @@ In your pom.xml, add:
   <dependency>
     <groupId>io.bigconnect</groupId>
     <artifactId>bc-connector-apache-spark_2.11</artifactId>
-    <version>4.2.1_for_spark_2.4</version>
+    <version>VERSION_for_spark_2.4</version>
   </dependency>
 </dependencies>
-<repositories>
-  <!-- list of other repositories -->
-  <repository>
-    <id>SparkPackagesRepo</id>
-    <url>http://dl.bintray.com/spark-packages/maven</url>
-  </repository>
-</repositories>
 ```
 
 In case of Spark 3
@@ -92,14 +83,7 @@ In case of Spark 3
   <dependency>
     <groupId>io.bigconnect</groupId>
     <artifactId>bc-connector-apache-spark_2.12</artifactId>
-    <version>4.2.1_for_spark_3</version>
+    <version>VERSION_for_spark_3</version>
   </dependency>
 </dependencies>
-<repositories>
-  <!-- list of other repositories -->
-  <repository>
-    <id>SparkPackagesRepo</id>
-    <url>http://dl.bintray.com/spark-packages/maven</url>
-  </repository>
-</repositories>
 ```

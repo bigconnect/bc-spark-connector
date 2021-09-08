@@ -11,7 +11,7 @@ import java.sql.Timestamp
 import java.time.{LocalDateTime, OffsetDateTime, ZoneOffset}
 import scala.collection.mutable
 
-class DataSourceReaderTest extends SparkConnectorScalaBaseTest {
+class DataSourceReaderTest extends SparkConnectorScalaBaseTest with BaseConnectionOptions {
   @Test
   def testThrowsExceptionIfNoValidReadOptionIsSet(): Unit = {
     try {
@@ -511,23 +511,6 @@ class DataSourceReaderTest extends SparkConnectorScalaBaseTest {
     assertEquals(1, result.size())
     assertEquals("John Mayer", result.get(0).getString(0))
   }
-
-  def optionMap(): scala.collection.Map[String, String] = Map(
-    BcOptions.GRAPH_SEARCH_LOCATIONS -> "localhost",
-    BcOptions.GRAPH_SEARCH_CLUSTERNAME -> "bdl",
-    BcOptions.GRAPH_SEARCH_PORT -> "9300",
-    BcOptions.GRAPH_SEARCH_INDEXNAME -> ".ge",
-    BcOptions.GRAPH_ZOOKEEPERS -> "localhost:2181",
-    BcOptions.GRAPH_HDFS_ROOT_DIR -> "hdfs://localhost:9000",
-    BcOptions.GRAPH_HDFS_DATA_DIR -> "/bigconnect/data",
-    BcOptions.GRAPH_HDFS_USER -> "flavius",
-    BcOptions.GRAPH_HDFS_CONF_DIR -> "/opt/bdl/etc/hadoop",
-    BcOptions.GRAPH_ACCUMULO_INSTANCE -> "accumulo",
-    BcOptions.GRAPH_ACCUMULO_PREFIX -> "bc",
-    BcOptions.GRAPH_ACCUMULO_USER -> "root",
-    BcOptions.GRAPH_ACCUMULO_PASSWORD -> "secret",
-    BcOptions.PARTITIONING_STRATEGY -> BcOptions.PARTITIONING_STRATEGY_SHARD
-  )
 
   private def initTest(query: String, elementType: String = BcMapping.TYPE_VERTEX): DataFrame = {
     SparkConnectorScalaBaseTest.bcSession()

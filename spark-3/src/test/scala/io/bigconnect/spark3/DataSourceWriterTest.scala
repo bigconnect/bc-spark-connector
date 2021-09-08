@@ -3,13 +3,47 @@ package io.bigconnect.spark3
 import com.mware.core.model.schema.SchemaConstants
 import io.bigconnect.spark.SparkConnectorScalaBaseTest
 import io.bigconnect.spark.util.{BcMapping, BcOptions}
-import org.apache.spark.sql.SaveMode
+import org.apache.spark.sql.{DataFrame, SaveMode}
+import org.junit.Assert.assertEquals
 import org.junit.Test
+
+import java.time.ZoneOffset
 
 case class Person(name: String, surname: String, age: Int)
 
-class DataSourceWriterTest extends SparkConnectorScalaBaseTest {
+class DataSourceWriterTest extends SparkConnectorScalaBaseTest with BaseConnectionOptions {
   import spark.implicits._
+
+  private def testType[T](ds: DataFrame, neo4jType: Type): Unit = {
+    ds.write
+      .format(classOf[DataSource].getName)
+      .mode(SaveMode.Append)
+      .options(optionMap())
+      .option(BcOptions.ELEMENT_TYPE, BcMapping.TYPE_VERTEX)
+      .option("labels", ":MyNode:MyLabel")
+      .save()
+
+    val records = SparkConnectorScalaSuiteIT.session().run(
+      """MATCH (p:MyNode:MyLabel)
+        |RETURN p.foo AS foo
+        |""".stripMargin).list().asScala
+      .filter(r => r.get("foo").hasType(neo4jType))
+      .map(r => r.asMap().asScala)
+      .toSet
+    val expected = ds.collect()
+      .map(row => Map("foo" -> {
+        val foo = row.getAs[T]("foo")
+        foo match {
+          case sqlDate: java.sql.Date => sqlDate
+            .toLocalDate
+          case sqlTimestamp: java.sql.Timestamp => sqlTimestamp.toInstant
+            .atZone(ZoneOffset.UTC)
+          case _ => foo
+        }
+      }))
+      .toSet
+    assertEquals(expected, records)
+  }
 
   @Test
   def `should write nodes with string values`(): Unit = {
@@ -70,20 +104,4 @@ class DataSourceWriterTest extends SparkConnectorScalaBaseTest {
       .option(BcOptions.ELEMENT_TYPE, BcMapping.TYPE_VERTEX)
       .save()
   }
-
-  def optionMap(): scala.collection.Map[String, String] = Map(
-    BcOptions.GRAPH_SEARCH_LOCATIONS -> "localhost",
-    BcOptions.GRAPH_SEARCH_CLUSTERNAME -> "bdl",
-    BcOptions.GRAPH_SEARCH_PORT -> "9300",
-    BcOptions.GRAPH_SEARCH_INDEXNAME -> "test_ge",
-    BcOptions.GRAPH_ZOOKEEPERS -> "localhost:2181",
-    BcOptions.GRAPH_HDFS_ROOT_DIR -> "hdfs://localhost:9000",
-    BcOptions.GRAPH_HDFS_DATA_DIR -> "/bigconnect/data",
-    BcOptions.GRAPH_HDFS_USER -> "flavius",
-    BcOptions.GRAPH_HDFS_CONF_DIR -> "/opt/bdl/etc/hadoop",
-    BcOptions.GRAPH_ACCUMULO_INSTANCE -> "accumulo",
-    BcOptions.GRAPH_ACCUMULO_PREFIX -> "test",
-    BcOptions.GRAPH_ACCUMULO_USER -> "root",
-    BcOptions.GRAPH_ACCUMULO_PASSWORD -> "secret"
-  )
 }

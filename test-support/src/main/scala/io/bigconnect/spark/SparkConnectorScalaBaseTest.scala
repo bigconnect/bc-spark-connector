@@ -2,6 +2,7 @@ package io.bigconnect.spark
 
 import com.mware.bigconnect.driver.Logging.slf4j
 import com.mware.bigconnect.driver._
+import com.mware.core.model.schema.SchemaConstants
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 import org.junit.rules.TestName
@@ -58,13 +59,27 @@ class SparkConnectorScalaBaseTest {
 
   @Before
   def before(): Unit = {
-    SparkConnectorScalaBaseTest.bcSession()
-      .run("MATCH (n) DELETE n").consume()
-    SparkConnectorScalaBaseTest.bcSession()
-      .run(
-        "CALL db.propertyKeys() YIELD propertyKey " +
+    val bcSession = SparkConnectorScalaBaseTest.bcSession()
+
+    bcSession.run("MATCH (n) DELETE n")
+      .consume()
+
+    bcSession.run(
+      "CALL db.propertyKeys() YIELD propertyKey " +
         "CALL schema.deleteProperty('public-ontology', propertyKey) " +
-          "RETURN propertyKey"
-      ).consume()
+        "RETURN propertyKey"
+    ).consume()
+
+    bcSession.run(
+      "CALL db.schemaRelationships() YIELD name " +
+        "CALL schema.deleteRelationship('public-ontology', name) " +
+        "RETURN name"
+    ).consume()
+
+    bcSession.run(
+      s"CALL db.schemaConcepts() YIELD name WITH name WHERE name <> '${SchemaConstants.CONCEPT_TYPE_THING}' " +
+        "CALL schema.deleteConcept('public-ontology', name) " +
+        "RETURN name"
+    ).consume()
   }
 }

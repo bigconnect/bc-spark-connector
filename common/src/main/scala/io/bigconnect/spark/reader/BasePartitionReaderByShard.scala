@@ -1,17 +1,18 @@
 package io.bigconnect.spark.reader
 
-import com.mware.ge.{Direction, Edge, Element, ElementType, Vertex}
-import com.mware.ge.query.{Compare, Contains, Query, QueryResultsIterable, TextPredicate}
-import com.mware.ge.query.builder.GeQueryBuilders.{boolQuery, exists, hasConceptType, hasEdgeLabel, hasFilter, hasIds, searchAll}
+import _root_.io.bigconnect.spark.util.BcMapping._
+import _root_.io.bigconnect.spark.util.{BcMapping, BcOptions, BcUtil}
+import com.mware.ge._
+import com.mware.ge.query._
+import com.mware.ge.query.builder.GeQueryBuilders._
 import com.mware.ge.query.builder.{BoolQueryBuilder, GeQueryBuilder, GeQueryBuilders}
-import com.mware.ge.values.storable.{Value, Values}
-import io.bigconnect.spark.util.BcMapping.{CONCEPT_TYPE_FIELD, DEST_ID_FIELD, EDGE_LABEL_FIELD, ID_FIELD, SOURCE_ID_FIELD, convertToInternalRow}
-import io.bigconnect.spark.util.{BcMapping, BcOptions, BcUtil}
+import com.mware.ge.values.storable.{DateValue, LocalDateTimeValue, Value, Values}
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.sources.{And, EqualNullSafe, EqualTo, Filter, GreaterThan, GreaterThanOrEqual, In, IsNotNull, IsNull, LessThan, LessThanOrEqual, Not, Or, StringContains, StringEndsWith, StringStartsWith}
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.sources._
+import org.apache.spark.sql.types._
 
+import java.sql.{Date, Timestamp}
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
@@ -86,21 +87,21 @@ class BasePartitionReaderByShard(private val options: BcOptions,
           case BcMapping.ID_FIELD => hasIds(value.asInstanceOf[String])
           case BcMapping.CONCEPT_TYPE_FIELD => hasConceptType(value.asInstanceOf[String])
           case BcMapping.EDGE_LABEL_FIELD => hasEdgeLabel(value.asInstanceOf[String])
-          case _ => hasFilter(attribute, Compare.EQUAL, Values.of(value))
+          case _ => hasFilter(attribute, Compare.EQUAL, sparkValueToBcValue(attribute, value))
         }
       case EqualNullSafe(attribute, value) =>
         if (value == null)
           exists(attribute)
         else
-        hasFilter(attribute, Compare.EQUAL, Values.of(value))
+          hasFilter(attribute, Compare.EQUAL, sparkValueToBcValue(attribute, value))
       case GreaterThan(attribute, value) =>
-        hasFilter(attribute, Compare.GREATER_THAN, Values.of(value))
+        hasFilter(attribute, Compare.GREATER_THAN, sparkValueToBcValue(attribute, value))
       case GreaterThanOrEqual(attribute, value) =>
-        hasFilter(attribute, Compare.GREATER_THAN_EQUAL, Values.of(value))
+        hasFilter(attribute, Compare.GREATER_THAN_EQUAL, sparkValueToBcValue(attribute, value))
       case LessThan(attribute, value) =>
-        hasFilter(attribute, Compare.LESS_THAN, Values.of(value))
+        hasFilter(attribute, Compare.LESS_THAN, sparkValueToBcValue(attribute, value))
       case LessThanOrEqual(attribute, value) =>
-        hasFilter(attribute, Compare.LESS_THAN_EQUAL, Values.of(value))
+        hasFilter(attribute, Compare.LESS_THAN_EQUAL, sparkValueToBcValue(attribute, value))
       case In(attribute, values) => {
         // when dealing with mixed types (strings and numbers) Spark converts the Strings to null (gets confused by the type field)
         // this leads to incorrect query DSL hence why nulls are filtered
@@ -108,7 +109,7 @@ class BasePartitionReaderByShard(private val options: BcOptions,
         if (filtered.isEmpty) {
           return searchAll()
         }
-        hasFilter(attribute, Contains.IN, Values.of(filtered))
+        hasFilter(attribute, Contains.IN, sparkValueToBcValue(attribute, filtered))
       }
       case StringContains(attribute, value) =>
         hasFilter(attribute, TextPredicate.CONTAINS, Values.stringValue(value))
@@ -116,6 +117,24 @@ class BasePartitionReaderByShard(private val options: BcOptions,
         hasFilter(attribute, Compare.STARTS_WITH, Values.stringValue(value))
       case StringEndsWith(attribute, value) =>
         hasFilter(attribute, Compare.ENDS_WITH, Values.stringValue(value))
+    }
+  }
+
+  def sparkValueToBcValue(field: String, value: Any): Value = {
+    val isArray = value.isInstanceOf[Array[_]]
+    schema.apply(field).dataType match {
+      case BooleanType => if (isArray) Values.booleanArray(value.asInstanceOf[Array[_]].map(v => v.asInstanceOf[Boolean])) else Values.booleanValue(value.asInstanceOf[Boolean])
+      case IntegerType => if (isArray) Values.intArray(value.asInstanceOf[Array[_]].map(v => v.asInstanceOf[Int])) else Values.intValue(value.asInstanceOf[Int])
+      case LongType => if (isArray) Values.longArray(value.asInstanceOf[Array[_]].map(v => v.asInstanceOf[Long])) else Values.longValue(value.asInstanceOf[Long])
+      case ShortType => if (isArray) Values.shortArray(value.asInstanceOf[Array[_]].map(v => v.asInstanceOf[Short])) else Values.shortValue(value.asInstanceOf[Short])
+      case ByteType => if (isArray) Values.byteArray(value.asInstanceOf[Array[_]].map(v => v.asInstanceOf[Byte])) else Values.byteValue(value.asInstanceOf[Byte])
+      case FloatType => if (isArray) Values.floatArray(value.asInstanceOf[Array[_]].map(v => v.asInstanceOf[Float])) else Values.floatValue(value.asInstanceOf[Float])
+      case DoubleType => if (isArray) Values.doubleArray(value.asInstanceOf[Array[_]].map(v => v.asInstanceOf[Double])) else Values.doubleValue(value.asInstanceOf[Double])
+      case DateType => if (isArray) Values.dateArray(value.asInstanceOf[Array[Date]].map(d => d.toLocalDate)) else DateValue.date(value.asInstanceOf[Date].toLocalDate)
+      case TimestampType => if (isArray) Values.localDateTimeArray(value.asInstanceOf[Array[Timestamp]].map(d => d.toLocalDateTime)) else LocalDateTimeValue.localDateTime(value.asInstanceOf[Timestamp].toLocalDateTime)
+      case StringType => if (isArray) Values.stringArray(value.asInstanceOf[Array[String]]: _*) else Values.stringValue(value.asInstanceOf[String])
+      case BcMapping.durationType => throw new IllegalArgumentException("Duration filters not supported")
+      case _ => Values.of(value)
     }
   }
 }

@@ -3,12 +3,14 @@ package io.bigconnect.spark.util
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.mware.core.config.Configuration
 import com.mware.core.model.clientapi.dto.PropertyType
-import com.mware.core.model.schema.SchemaRepository
+import com.mware.core.model.properties.SchemaProperties
+import com.mware.core.model.schema.{SchemaFactory, SchemaRepository}
 import com.mware.ge.mutation.ElementMutation
 import com.mware.ge.values.storable._
-import com.mware.ge.{Element, ElementType, Visibility}
+import com.mware.ge.{Element, ElementType, TextIndexHint, Visibility}
 import io.bigconnect.spark.util.BcUtil._
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.{GenericRowWithSchema, UnsafeArrayData, UnsafeRow}
 import org.apache.spark.sql.catalyst.util.{ArrayData, DateTimeUtils}
 import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
@@ -20,6 +22,7 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 object BcMapping {
+
   val TYPE_VERTEX = "VERTEX"
   val TYPE_EDGE = "EDGE"
 
@@ -43,17 +46,80 @@ object BcMapping {
     DataTypes.createStructField("value", DataTypes.StringType, false)
   ))
 
+  def ensureElementTypeExists(options: BcOptions): Unit = {
+    val bcConfig = options.configuration.toBcConfig
+    val schemaRepository = createSchemaRepository(createGraph(bcConfig), bcConfig)
+    val schemaFactory = new SchemaFactory(schemaRepository).forNamespace(SchemaRepository.PUBLIC)
+    val thingConcept = schemaFactory.getOrCreateThingConcept()
+    options.elementType match {
+      case BcMapping.TYPE_VERTEX => {
+        val existingConcept = schemaRepository.getConceptByName(options.conceptType)
+        if (existingConcept == null)
+          schemaFactory.newConcept()
+            .parent(thingConcept)
+            .conceptType(options.conceptType)
+            .displayName(options.conceptType)
+            .property(SchemaProperties.USER_VISIBLE.getPropertyName, BooleanValue.TRUE)
+            .save
+      }
+      case BcMapping.TYPE_EDGE => {
+        val existingRel = schemaRepository.getRequiredConceptByName(options.labelType)
+        if (existingRel == null)
+          schemaFactory.newRelationship()
+            .parent(schemaFactory.getOrCreateRootRelationship())
+            .label(options.labelType)
+            .source(thingConcept)
+            .target(thingConcept)
+            .property(SchemaProperties.USER_VISIBLE.getPropertyName, BooleanValue.TRUE)
+            .save
+      }
+    }
+  }
+
   def convertFromSpark(value: Any, schema: StructField = null): Value = {
     value match {
-      case date: java.sql.Date => convertFromSpark(date.toLocalDate, schema)
-      case timestamp: java.sql.Timestamp => convertFromSpark(timestamp.toInstant.atZone(ZoneOffset.UTC), schema)
-      case intValue: Int if schema != null && schema.dataType == DataTypes.DateType => convertFromSpark(DateTimeUtils
-        .toJavaDate(intValue), schema)
-      case longValue: Long if schema != null && schema.dataType == DataTypes.TimestampType => convertFromSpark(DateTimeUtils
-        .toJavaTimestamp(longValue), schema)
-      case string: UTF8String => convertFromSpark(string.toString)
+      case date: java.sql.Date => Values.of(date.toLocalDate)
+      case timestamp: java.sql.Timestamp => Values.of(timestamp.toInstant.atZone(ZoneOffset.UTC))
+      case intValue: Int if schema != null && schema.dataType == DataTypes.DateType => convertFromSpark(DateTimeUtils.toJavaDate(intValue))
+      case longValue: Long if schema != null && schema.dataType == DataTypes.TimestampType => convertFromSpark(DateTimeUtils.toJavaTimestamp(longValue))
+      case unsafeRow: UnsafeRow => {
+        val structType = extractStructType(schema.dataType)
+        val row = new GenericRowWithSchema(unsafeRow.toSeq(structType).toArray, structType)
+        convertFromSpark(row)
+      }
+      case struct: GenericRowWithSchema => {
+        val typ = struct.getAs[UTF8String]("type").toString
+        typ match {
+          case DURATION_TYPE => DurationValue.duration(
+            struct.getAs[Number]("months").longValue(),
+            struct.getAs[Number]("days").longValue(),
+            struct.getAs[Number]("seconds").longValue(),
+            struct.getAs[Number]("nanoseconds").intValue())
+          case _ => throw new IllegalArgumentException(s"Don't know how to convert a ${typ} to a BigConnect value")
+        }
+      }
+      case unsafeArray: UnsafeArrayData => {
+        val sparkType = schema.dataType match {
+          case arrayType: ArrayType => arrayType.elementType
+          case _ => schema.dataType
+        }
+        val safeArray = unsafeArray.toSeq[AnyRef](sparkType)
+          .map(elem => convertFromSpark(elem, schema))
+          .map(v => v.asObjectCopy())
+          .toArray
+
+        Values.of(safeArray)
+      }
+      case string: UTF8String => Values.stringValue(string.toString)
       case _ => Values.of(value)
     }
+  }
+
+  private def extractStructType(dataType: DataType): StructType = dataType match {
+    case structType: StructType => structType
+    case mapType: MapType => extractStructType(mapType.valueType)
+    case arrayType: ArrayType => extractStructType(arrayType.elementType)
+    case _ => throw new UnsupportedOperationException(s"$dataType not supported")
   }
 
   def convertFromInternalRow(row: InternalRow, schema: StructType, m: ElementMutation[_ <: Element]): ElementMutation[_ <: Element] = {
@@ -109,6 +175,43 @@ object BcMapping {
     }
   }
 
+  def ensureSchemaCreated(config: Configuration, sparkSchema: StructType) = {
+    schemaRepository = createSchemaRepository(createGraph(config), config)
+    val schemaProps = schemaRepository.getProperties(SchemaRepository.PUBLIC).asScala
+      .map(p => p.getName).toSeq
+
+    val propsToAdd = sparkSchema.map(f => f.name).diff(schemaProps)
+
+    if (propsToAdd.nonEmpty) {
+      val schemaFactory = new SchemaFactory(schemaRepository).forNamespace(SchemaRepository.PUBLIC)
+
+      sparkSchema.filter(f => propsToAdd.contains(f.name))
+        .foreach(f => {
+          val bcType = toBcDataType(f.dataType)
+          val prop = schemaFactory.newConceptProperty
+            .name(f.name)
+            .concepts(schemaRepository.getThingConcept)
+            .displayName(f.name)
+            .`type`(bcType)
+            .systemProperty(false)
+            .userVisible(true)
+            .searchable(true)
+            .updatable(true)
+            .addable(true)
+
+          if (f.dataType == StringType) {
+            prop.textIndexHints(TextIndexHint.ALL)
+          } else {
+            prop.textIndexHints(TextIndexHint.EXACT_MATCH)
+          }
+
+          prop.save()
+        })
+
+      schemaRepository.clearCache()
+    }
+  }
+
   def structFromSchema(config: Configuration, elementType: ElementType): StructType = {
     schemaRepository = createSchemaRepository(createGraph(config), config)
     val structFields: mutable.Buffer[StructField] = schemaRepository.getProperties(SchemaRepository.PUBLIC)
@@ -129,6 +232,28 @@ object BcMapping {
       structFields += StructField(DEST_ID_FIELD, DataTypes.StringType, nullable = false)
     }
     StructType(structFields.reverse)
+  }
+
+  def toBcDataType(sparkType: DataType): PropertyType = {
+    var isArray = false
+    var typeToTest = sparkType
+    if (sparkType.isInstanceOf[ArrayType]) {
+      isArray = true
+      typeToTest = sparkType.asInstanceOf[ArrayType].elementType
+    }
+    typeToTest match {
+      case DataTypes.BooleanType => if (isArray) PropertyType.BOOLEAN_ARRAY else PropertyType.BOOLEAN
+      case DataTypes.IntegerType => if (isArray) PropertyType.INTEGER_ARRAY else PropertyType.INTEGER
+      case DataTypes.LongType => if (isArray) PropertyType.LONG_ARRAY else PropertyType.LONG
+      case DataTypes.ShortType => if (isArray) PropertyType.SHORT_ARRAY else PropertyType.SHORT
+      case DataTypes.ByteType => if (isArray) PropertyType.BYTE_ARRAY else PropertyType.BYTE
+      case DataTypes.FloatType => if (isArray) PropertyType.FLOAT_ARRAY else PropertyType.FLOAT
+      case DataTypes.DoubleType => if (isArray) PropertyType.DOUBLE_ARRAY else PropertyType.DOUBLE
+      case DataTypes.TimestampType => if (isArray) PropertyType.LOCAL_DATETIME_ARRAY else PropertyType.LOCAL_DATETIME
+      case DataTypes.DateType => if (isArray) PropertyType.LOCAL_DATE_ARRAY else PropertyType.LOCAL_DATE
+      // default is STRING
+      case _ => if (isArray) PropertyType.STRING_ARRAY else PropertyType.STRING
+    }
   }
 
   def toSparkDataType(name: String, bcDataType: PropertyType): DataType = {

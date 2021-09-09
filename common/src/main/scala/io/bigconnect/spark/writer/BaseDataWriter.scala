@@ -1,8 +1,7 @@
 package io.bigconnect.spark.writer
 
-import com.mware.core.model.schema.SchemaConstants
 import com.mware.ge.mutation.ElementMutation
-import com.mware.ge.values.storable.{TextValue, Values}
+import com.mware.ge.values.storable.TextValue
 import com.mware.ge.{Element, Visibility}
 import io.bigconnect.spark.util.BcMapping._
 import io.bigconnect.spark.util.{BcMapping, BcOptions, BcUtil}
@@ -20,6 +19,9 @@ class BaseDataWriter(partitionId: Int, jobId: String, schema: StructType, saveMo
   private val graph = BcUtil.createGraph(configuration)
   graph.getSearchIndex.enableBulkIngest(true)
 
+  BcMapping.ensureSchemaCreated(options.configuration.toBcConfig, schema)
+  BcMapping.ensureElementTypeExists(options)
+
   private def writeBatch(): Unit = {
     graph.saveElementMutations(batch, options.authorizations)
     batch.clear()
@@ -29,59 +31,58 @@ class BaseDataWriter(partitionId: Int, jobId: String, schema: StructType, saveMo
     var m: ElementMutation[_ <: Element] = null
 
     if (options.elementType == BcMapping.TYPE_EDGE) {
-      val edgeLabel: String = BcMapping.getColValue(row, schema, EDGE_LABEL_FIELD)
-        .orElse(Values.stringValue(SchemaConstants.EDGE_LABEL_HAS_ENTITY))
-        .asInstanceOf[TextValue]
-        .stringValue()
-      val sid = BcMapping.getColValue(row, schema, SOURCE_ID_FIELD)
-      if (sid.isPresent)
-        throw new IllegalArgumentException(s"Schema does not contain ${BcMapping.SOURCE_ID_FIELD} column for edge");
-      val sourceId: String = sid.get()
-        .asInstanceOf[TextValue]
-        .stringValue()
-      val did = BcMapping.getColValue(row, schema, DEST_ID_FIELD)
-      if (did.isPresent)
-        throw new IllegalArgumentException(s"Schema does not contain ${BcMapping.DEST_ID_FIELD} column for edge")
-      val destId: String = did
-        .asInstanceOf[TextValue]
-        .stringValue()
-
-      if (schema.fieldNames.contains(ID_FIELD)) {
-        val idf =  BcMapping.getColValue(row, schema, ID_FIELD)
-        if (idf.isPresent)
-          throw new IllegalArgumentException(s"No ${ID_FIELD} field found")
-        val id: String = idf
-          .asInstanceOf[TextValue]
-          .stringValue()
-        m = graph.prepareEdge(id, sourceId, destId, edgeLabel, Visibility.EMPTY)
-      } else {
-        m = graph.prepareEdge(sourceId, destId, edgeLabel, Visibility.EMPTY)
-      }
+      m = prepareEdge(row)
     } else {
-      val conceptType: String = BcMapping.getColValue(row, schema, CONCEPT_TYPE_FIELD)
-        .orElse(Values.stringValue(SchemaConstants.CONCEPT_TYPE_THING))
-        .asInstanceOf[TextValue]
-        .stringValue()
-
-      if (schema.fieldNames.contains(ID_FIELD)) {
-        // this is an update
-        val idf =  BcMapping.getColValue(row, schema, ID_FIELD)
-        if (idf.isPresent)
-          throw new IllegalArgumentException(s"No ${ID_FIELD} field found")
-        val id: String = idf
-          .asInstanceOf[TextValue]
-          .stringValue()
-
-        m = graph.prepareVertex(id, Visibility.EMPTY, conceptType)
-      } else {
-        // new vertex
-        m = graph.prepareVertex(Visibility.EMPTY, conceptType)
-      }
+      m = prepareVertex(row)
     }
 
     batch.add(BcMapping.convertFromInternalRow(row, schema, m))
     if (batch.size() == options.batchSize) {
       writeBatch()
+    }
+  }
+
+  def prepareEdge(row: InternalRow): ElementMutation[_ <: Element] = {
+    val sid = BcMapping.getColValue(row, schema, SOURCE_ID_FIELD)
+    if (sid.isPresent)
+      throw new IllegalArgumentException(s"Schema does not contain ${BcMapping.SOURCE_ID_FIELD} column for edge");
+    val sourceId: String = sid.get()
+      .asInstanceOf[TextValue]
+      .stringValue()
+    val did = BcMapping.getColValue(row, schema, DEST_ID_FIELD)
+    if (did.isPresent)
+      throw new IllegalArgumentException(s"Schema does not contain ${BcMapping.DEST_ID_FIELD} column for edge")
+    val destId: String = did
+      .asInstanceOf[TextValue]
+      .stringValue()
+
+    if (schema.fieldNames.contains(ID_FIELD)) {
+      val idf =  BcMapping.getColValue(row, schema, ID_FIELD)
+      if (idf.isPresent)
+        throw new IllegalArgumentException(s"No ${ID_FIELD} field found")
+      val id: String = idf
+        .asInstanceOf[TextValue]
+        .stringValue()
+      graph.prepareEdge(id, sourceId, destId, options.labelType, Visibility.EMPTY)
+    } else {
+       graph.prepareEdge(sourceId, destId, options.labelType, Visibility.EMPTY)
+    }
+  }
+
+  def prepareVertex(row: InternalRow): ElementMutation[_ <: Element] = {
+    if (schema.fieldNames.contains(ID_FIELD)) {
+      // this is an update
+      val idf =  BcMapping.getColValue(row, schema, ID_FIELD)
+      if (idf.isPresent)
+        throw new IllegalArgumentException(s"No ${ID_FIELD} field found")
+      val id: String = idf
+        .asInstanceOf[TextValue]
+        .stringValue()
+
+      graph.prepareVertex(id, Visibility.EMPTY, options.conceptType)
+    } else {
+      // new vertex
+      graph.prepareVertex(Visibility.EMPTY, options.conceptType)
     }
   }
 

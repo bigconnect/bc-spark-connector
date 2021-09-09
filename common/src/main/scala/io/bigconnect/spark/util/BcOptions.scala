@@ -1,6 +1,7 @@
   package io.bigconnect.spark.util
 
 import com.mware.core.config.{Configuration, HashMapConfigurationLoader}
+import com.mware.core.model.schema.SchemaConstants
 import com.mware.ge.accumulo.AccumuloGraphConfiguration
 import com.mware.ge.{Authorizations, FetchHints}
 import org.apache.spark.sql.SparkSession
@@ -18,6 +19,8 @@ class BcOptions(private val options: java.util.Map[String, String]) extends Seri
   } else {
     new Authorizations(getParameter(AUTHORIZATIONS, DEFAULT_EMPTY))
   }
+  val conceptType:String = getParameter(CONCEPT_TYPE, SchemaConstants.CONCEPT_TYPE_THING)
+  val labelType:String = getParameter(LABEL_TYPE, SchemaConstants.EDGE_LABEL_HAS_ENTITY)
   val fetchHints: FetchHints = getParameter(FETCH_HINTS, DEFAULT_FETCH_HINTS) match {
     case "ALL" => FetchHints.ALL
     case "PROPERTIES" => FetchHints.PROPERTIES
@@ -92,6 +95,8 @@ object BcOptions {
   val AUTHORIZATIONS = "authorizations"
   val FETCH_HINTS = "reader.fetchHints"
   val BATCH_SIZE = "writer.batchSize"
+  val CONCEPT_TYPE = "conceptType"
+  val LABEL_TYPE = "labelType"
 
   // connection options
   val GRAPH_SEARCH = "graph.search"
